@@ -1,77 +1,67 @@
 #!/bin/bash
 
 # -------------------------
-# GPU Miner (WildRig-Multi)
+# WildRig-Multi Auto Miner
 # -------------------------
-GPU_CHECK_FILE="/root/wildrig-multi"
-GPU_WORKER="gigaspot"
-GPU_WALLET="bc1qse4agv63zhr8akyptzlze53tc5wnrp9070k3qc"
-GPU_ALGO="qhash"
-GPU_POOL="qubitcoin.luckypool.io:8610"
 
-# -------------------------
-# CPU Miner (JETSKI-QUBIC)
-# -------------------------
-CPU_DIR="/root/qjetski.PPLNS-3.4.4-Linux"
-CPU_BIN="$CPU_DIR/qjetski-Client"
+# Configurable variables
+URL="https://github.com/andru-kun/wildrig-multi/releases/download/0.45.8/wildrig-multi-linux-0.45.8.tar.xz"
+FILENAME="wildrig-multi-linux-0.45.8.tar.xz"
+DEST_DIR="/root"
+CHECK_FILE="$DEST_DIR/wildrig-multi"
+RETRY_INTERVAL=120
 
-# -------------------------
-# Create Jetski config automatically
-# -------------------------
-echo "Generating appsettings.json for Jetski..."
-mkdir -p "$CPU_DIR"
-cat > "$CPU_DIR/appsettings.json" <<EOF
-{
-    "ClientSettings": {
-        "poolAddress": "wss://pplnsjetski.xyz/ws/TIMUNHUGVSKMPATIJPQEULVTHZQDNUEYJCUHMXQRSDIPAOQTGJPCHDSEURUC",
-        "alias": "gigaspot",
-        "accessToken": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJJZCI6ImZiZDRlODYyLTkxZWEtNDM1NS04YzFlLTA5Y2M2MmQwNjA2MiIsIk1pbmluZyI6IiIsIm5iZiI6MTc1NTcxMTY2MiwiZXhwIjoxNzg3MjQ3NjYyLCJpYXQiOjE3NTU3MTE2NjIsImlzcyI6Imh0dHBzOi8vcXViaWMubGkvIiwiYXVkIjoiaHR0cHM6Ly9xdWJpYy5saS8ifQ.qPA6YWsSenUztyObsghbeePK28zNQ7iY3kazWsk9fJgegbcMo58SLal5Q1ytzPxfaMZIyLhActlzxjBT3G4mwayrzAiyh9IDqXh4CUWNQ54W1LPCzv-uQPuyjy8HNr7qJUFDI-fl54kBXBXGbkCfvghvkX0eP5w1pD0WAmpGTbUmCyead2U3NGDbs2a6DrdRi86uFVp8Pxzg_cwVuFuKFhJx5oVitBCIPPcYSSDz8m9l2C6B1icvwTWGXJnchlOIJ12cjFXpkq_DHhp_M4lWwpMpJGGsl1YKWQ22OrpVheJZM22z-rsgQ4RU3LVbGU1BoY3ssOFmtCnzIE_D5ekATg",
-        "pps": true,
-        "trainer": {
-            "cpu": true,
-            "gpu": false
-        },
-        "xmrSettings": {
-            "disable": false,
-            "enableGpu": false,
-            "poolAddress": "qxmr.jetskipool.ai:3333",
-            "customParameters": "",
-            "stratumBridge": {
-                "disable": true
-            }
-        },
-        "idling": {
-            "command": "",
-            "arguments": ""
-        }
-    }
-}
-EOF
+# Ensure WORKER_NAME is set
+if [ -z "$WORKER_NAME" ]; then
+    echo "Environment variable WORKER_NAME is not set. Exiting."
+    exit 1
+fi
 
-# -------------------------
-# Function to start miners inside screen sessions
-# -------------------------
-start_miners() {
-    echo "Starting GPU miner in screen session 'gpu'..."
-    screen -dmS gpu "$GPU_CHECK_FILE" --algo "$GPU_ALGO" --url "$GPU_POOL" --user "$GPU_WALLET.$GPU_WORKER" --pass x
+# Ensure WALLET is set
+if [ -z "$WALLET" ]; then
+    echo "Environment variable WALLET is not set. Exiting."
+    exit 1
+fi
 
-    echo "Starting CPU miner in screen session 'cpu'..."
-    screen -dmS cpu "$CPU_BIN"
+# Error handler
+error_exit() {
+    echo "$1" >&2
+    exit 1
 }
 
+# Retry download until success
+download_with_retries() {
+    while true; do
+        wget -O "$FILENAME" "$URL"
+        if [ $? -eq 0 ] && [ -s "$FILENAME" ]; then
+            return 0
+        else
+            echo "Download failed or empty file. Retrying in $RETRY_INTERVAL seconds..."
+            rm -f "$FILENAME"
+            sleep $RETRY_INTERVAL
+        fi
+    done
+}
+
+# Download and extract if needed
+if [ -f "$CHECK_FILE" ]; then
+    echo "WildRig-Multi already exists. Skipping download."
+else
+    download_with_retries
+    tar -xJf "$FILENAME" -C "$DEST_DIR" || error_exit "Extraction failed"
+    rm -f "$FILENAME"
+fi
+
 # -------------------------
-# Main loop: restart if sessions die
+# Run mining in loop
 # -------------------------
 while true; do
-    GPU_RUNNING=$(screen -list | grep -c "\.gpu")
-    CPU_RUNNING=$(screen -list | grep -c "\.cpu")
-
-    if [ $GPU_RUNNING -eq 0 ] || [ $CPU_RUNNING -eq 0 ]; then
-        echo "One or both miners are not running. Restarting..."
-        screen -S gpu -X quit >/dev/null 2>&1
-        screen -S cpu -X quit >/dev/null 2>&1
-        start_miners
-    fi
-
-    sleep 30
+    echo "Starting WildRig-Multi miner..."
+    $DEST_DIR/wildrig-multi \
+        --algo qhash \
+        --url ru.luckypool.io:8610 \
+        --user $WALLET.$WORKER_NAME \
+        --pass x
+    echo "Miner crashed or exited. Restarting in 10 seconds..."
+    sleep 10
 done
